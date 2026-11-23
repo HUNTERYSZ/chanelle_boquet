@@ -1,446 +1,470 @@
-// ─── SCENE SETUP ─────────────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({
-  canvas: document.getElementById('c'),
-  antialias: true,
-  alpha: true,
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x060008, 1);
 
-const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 0, 5);
+(() => {
+  const canvas = document.getElementById("scene");
+  const ctx = canvas.getContext("2d");
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  const intro = document.getElementById("intro");
+  const gift = document.getElementById("gift");
+  const openButton = document.getElementById("openButton");
+  const replayButton = document.getElementById("replayButton");
 
-// ─── LIGHTS ──────────────────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const pinkLight = new THREE.PointLight(0xff69a0, 2, 20);
-pinkLight.position.set(2, 2, 3);
-scene.add(pinkLight);
-const pinkLight2 = new THREE.PointLight(0xff1493, 1.5, 20);
-pinkLight2.position.set(-2, -1, 2);
-scene.add(pinkLight2);
+  let W, H, DPR, startTime = 0;
+  let animationStarted = false;
+  let lastTime = 0;
+  let elapsed = 0;
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-const rnd  = (a, b) => a + Math.random() * (b - a);
-const pick = arr   => arr[Math.floor(Math.random() * arr.length)];
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const ease  = t => t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // easeInOut
+  const reducedMotion =
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const PINKS    = [0xff69a0, 0xff1493, 0xe0157a, 0xffb3cc, 0xff5ca8, 0xffc0cb, 0xff79b0, 0xffaad4];
-const MAGENTAS = [0xff1493, 0xe0157a, 0xc01068, 0xff0066];
-const GREENS   = [0x4aaa4a, 0x3a9a3a, 0x5acc5a, 0x2a7a2a];
-const GOLD     = [0xffd700, 0xffec6e];
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-function mat(color, emissive, rough, metal) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    emissive:          emissive ?? color,
-    emissiveIntensity: 0.3,
-    roughness:         rough  ?? 0.6,
-    metalness:         metal  ?? 0.1,
-    side: THREE.DoubleSide,
-  });
-}
-function hexToRgb(hex) {
-  return [(hex>>16&0xff)/255,(hex>>8&0xff)/255,(hex&0xff)/255];
-}
-
-// ─── FLOWER FACTORY ──────────────────────────────────────────────────────────
-function makePetal(color) {
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.bezierCurveTo( 0.4,  0.1,  0.5,  0.6,  0,   0.9);
-  shape.bezierCurveTo(-0.5,  0.6, -0.4,  0.1,  0,   0);
-  return new THREE.Mesh(new THREE.ShapeGeometry(shape, 8), mat(color));
-}
-
-function makeFlower(color, color2, size, petalCount) {
-  const group = new THREE.Group();
-  for (let i = 0; i < petalCount; i++) {
-    const p = makePetal(color);
-    p.scale.setScalar(size);
-    p.rotation.z = (i / petalCount) * Math.PI * 2;
-    p.position.z = rnd(-0.01, 0.01);
-    group.add(p);
-  }
-  for (let i = 0; i < petalCount; i++) {
-    const p = makePetal(color2);
-    p.scale.setScalar(size * 0.55);
-    p.rotation.z = (i / petalCount) * Math.PI * 2 + Math.PI / petalCount;
-    p.position.z = 0.02;
-    group.add(p);
-  }
-  const center = new THREE.Mesh(
-    new THREE.SphereGeometry(size * 0.28, 8, 8),
-    mat(pick(GOLD), pick(GOLD), 0.3, 0.4)
-  );
-  center.position.z = 0.05;
-  group.add(center);
-  return group;
-}
-
-// ─── BOUQUET GROUP ───────────────────────────────────────────────────────────
-const bouquet = new THREE.Group();
-scene.add(bouquet);
-bouquet.position.y = 0.3;
-
-// flowers with animation metadata
-const NUM_FLOWERS  = 55;
-const flowerMeshes = [];
-
-for (let i = 0; i < NUM_FLOWERS; i++) {
-  const theta  = rnd(0, Math.PI * 2);
-  const phi    = rnd(0, Math.PI * 0.72);
-  const r      = rnd(0.3, 1.5);
-  const tx     = r * Math.sin(phi) * Math.cos(theta);
-  const ty     = r * Math.cos(phi) * 0.7 + 0.4;
-  const tz     = r * Math.sin(phi) * Math.sin(theta) * 0.55;
-
-  const color  = pick(PINKS);
-  const color2 = pick(MAGENTAS);
-  const size   = rnd(0.07, 0.19);
-  const pc     = Math.random() < 0.4 ? 8 : (Math.random() < 0.5 ? 5 : 6);
-
-  const flower = makeFlower(color, color2, size, pc);
-  flower.position.set(tx, ty, tz);
-  flower.rotation.z = rnd(0, Math.PI * 2);
-
-  // start invisible + scaled to 0 for intro animation
-  flower.scale.setScalar(0);
-  flower.visible = false;
-
-  bouquet.add(flower);
-  flowerMeshes.push({
-    mesh:    flower,
-    rotSpd:  rnd(-0.01, 0.01),
-    // staggered reveal delay 0.3s–2.4s
-    delay:   0.3 + (i / NUM_FLOWERS) * 2.1,
-    tx, ty, tz,
-  });
-}
-
-// stems — store tube progress for grow animation
-function makeStemGrowing(x, z) {
-  // return control points; we rebuild geometry each frame during intro
-  return {
-    pts: [
-      new THREE.Vector3(x,          -1.6, z),
-      new THREE.Vector3(x * 0.8,   -1.0, z * 0.8),
-      new THREE.Vector3(x * 0.5,   -0.4, z * 0.5),
-      new THREE.Vector3(x * 0.2,    0.0, z * 0.2),
-      new THREE.Vector3(x * 0.05,   0.3, z * 0.05),
-    ],
-    color: pick(GREENS),
-    mesh:  null,
-    progress: 0,
+  const ease = t => {
+    t = clamp(t, 0, 1);
+    return t * t * (3 - 2 * t);
   };
-}
 
-const stemData = [];
-for (let i = 0; i < 8; i++) {
-  const angle = (i / 8) * Math.PI * 2;
-  const r     = rnd(0.1, 0.5);
-  stemData.push(makeStemGrowing(Math.cos(angle) * r, Math.sin(angle) * r));
-}
+  const backEase = t => {
+    t = clamp(t, 0, 1);
+    const c = 1.45;
+    return 1 + (c + 1) * Math.pow(t - 1, 3)
+             + c * Math.pow(t - 1, 2);
+  };
 
-function buildStemMesh(sd, progress) {
-  if (sd.mesh) { bouquet.remove(sd.mesh); sd.mesh.geometry.dispose(); }
-  const p    = clamp(progress, 0.001, 1);
-  const idx  = Math.floor(p * (sd.pts.length - 1));
-  const frac = (p * (sd.pts.length - 1)) - idx;
-  const sub  = sd.pts.slice(0, idx + 1);
-  if (idx < sd.pts.length - 1) {
-    const interp = new THREE.Vector3().lerpVectors(sd.pts[idx], sd.pts[idx+1], frac);
-    sub.push(interp);
+  const pinks = [
+    "#ff75a9",
+    "#ff91ba",
+    "#ffb4cb",
+    "#ec659d",
+    "#ff9dc5",
+    "#ffd0df",
+    "#e978a8"
+  ];
+
+  const deepPinks = [
+    "#e84e91",
+    "#d95791",
+    "#f47eaa",
+    "#f7a4c0"
+  ];
+
+  const greens = [
+    "#397c58",
+    "#4b9666",
+    "#65a875",
+    "#286c4b"
+  ];
+
+  let flowers = [];
+  let stems = [];
+  let leaves = [];
+  let stars = [];
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+    W = window.innerWidth;
+    H = window.innerHeight;
+
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    createBouquet();
   }
-  if (sub.length < 2) return;
-  const curve = new THREE.CatmullRomCurve3(sub);
-  const geo   = new THREE.TubeGeometry(curve, 12, 0.012, 5, false);
-  sd.mesh     = new THREE.Mesh(geo, mat(sd.color, sd.color, 0.8, 0));
-  bouquet.add(sd.mesh);
-}
 
-// leaves
-function makeLeaf(color) {
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.bezierCurveTo( 0.3, 0.1,  0.4, 0.5,  0,   0.8);
-  shape.bezierCurveTo(-0.4, 0.5, -0.3, 0.1,  0,   0);
-  const m = new THREE.Mesh(new THREE.ShapeGeometry(shape, 6), mat(color, color, 0.9, 0));
-  m.scale.setScalar(0);
-  return m;
-}
+  function createBouquet() {
+    flowers = [];
+    stems = [];
+    leaves = [];
+    stars = [];
 
-const leafMeshes = [];
-for (let i = 0; i < 10; i++) {
-  const leaf  = makeLeaf(pick(GREENS));
-  const angle = rnd(0, Math.PI * 2);
-  const h     = rnd(-1.2, -0.2);
-  const r     = rnd(0.2, 0.6);
-  const ls    = rnd(0.15, 0.3);
-  leaf.position.set(Math.cos(angle) * r, h, Math.sin(angle) * r);
-  leaf.rotation.z = angle + rnd(-0.3, 0.3);
-  leaf.rotation.x = rnd(-0.4, 0.4);
-  bouquet.add(leaf);
-  leafMeshes.push({ mesh: leaf, targetScale: ls, delay: 0.1 + i * 0.08 });
-}
+    const count = 48;
 
-// ribbon + bow — start invisible
-const ribbonGeo = new THREE.TorusGeometry(0.5, 0.045, 8, 48);
-const ribbon    = new THREE.Mesh(ribbonGeo, mat(0xe0157a, 0xff1493, 0.5, 0.2));
-ribbon.position.y = -1.4; ribbon.rotation.x = Math.PI / 2;
-ribbon.scale.setScalar(0);
-bouquet.add(ribbon);
+    for (let i = 0; i < count; i++) {
+      const angle = rand(0, Math.PI * 2);
+      const radius = Math.sqrt(Math.random());
 
-const bowGeo = new THREE.TorusGeometry(0.14, 0.03, 6, 20);
-const bow1   = new THREE.Mesh(bowGeo, mat(0xff69a0, 0xff1493, 0.5, 0.1));
-const bow2   = bow1.clone();
-bow1.position.set(-0.18, -1.35, 0); bow1.rotation.z =  0.6; bow1.scale.setScalar(0);
-bow2.position.set( 0.18, -1.35, 0); bow2.rotation.z = -0.6; bow2.scale.setScalar(0);
-bouquet.add(bow1); bouquet.add(bow2);
+      const x = Math.cos(angle) * radius * rand(65, 135);
+      const y = -Math.abs(Math.sin(angle)) * radius * 105
+                - rand(5, 65);
 
-// ─── BUBU TEXTURE ────────────────────────────────────────────────────────────
-function makeBubuTexture() {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 256;
-  const c  = cv.getContext('2d');
-  c.clearRect(0, 0, 256, 256);
-  c.fillStyle = '#f5f0ff';
-  c.beginPath(); c.ellipse(128, 160, 70, 60, 0, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#ffffff';
-  c.beginPath(); c.arc(128, 100, 62, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#ffffff';
-  c.beginPath(); c.arc(76,  48, 24, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.arc(180, 48, 24, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#ffb3cc';
-  c.beginPath(); c.arc(76,  48, 13, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.arc(180, 48, 13, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#222';
-  c.beginPath(); c.arc(107, 95, 9, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.arc(149, 95, 9, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#fff';
-  c.beginPath(); c.arc(111, 91, 3.5, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.arc(153, 91, 3.5, 0, Math.PI*2); c.fill();
-  c.fillStyle = '#ff9abc';
-  c.beginPath(); c.ellipse(128, 112, 10, 7, 0, 0, Math.PI*2); c.fill();
-  c.strokeStyle = '#cc6688'; c.lineWidth = 3;
-  c.beginPath(); c.arc(128, 112, 14, 0.2, Math.PI-0.2); c.stroke();
-  c.fillStyle = 'rgba(255,160,180,0.4)';
-  c.beginPath(); c.ellipse(90,  118, 18, 11, -0.2, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.ellipse(166, 118, 18, 11,  0.2, 0, Math.PI*2); c.fill();
-  return new THREE.CanvasTexture(cv);
-}
+      flowers.push({
+        x,
+        y,
+        size: rand(9, 15),
+        petals: Math.floor(rand(5, 9)),
+        color: pinks[Math.floor(Math.random() * pinks.length)],
+        inner: deepPinks[Math.floor(Math.random() * deepPinks.length)],
+        center: Math.random() > .5 ? "#ffd36e" : "#ffe69b",
+        angle: rand(0, Math.PI * 2),
+        delay: i * .075,
+        scale: 0
+      });
+    }
 
-const bubuMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.8, 0.8),
-  new THREE.MeshBasicMaterial({ map: makeBubuTexture(), transparent: true, depthWrite: false })
-);
-bubuMesh.position.set(0, -1.95, 0.1);
-bubuMesh.scale.setScalar(0);
-scene.add(bubuMesh);
+    for (let i = 0; i < 11; i++) {
+      const angle = (i / 11) * Math.PI * 2;
 
-const heartCanvas = document.createElement('canvas');
-heartCanvas.width = heartCanvas.height = 64;
-const hc = heartCanvas.getContext('2d');
-hc.fillStyle = '#ff69a0'; hc.font = '44px serif'; hc.textAlign = 'center';
-hc.fillText('♡', 32, 48);
-const heartMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.3, 0.3),
-  new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(heartCanvas), transparent: true, depthWrite: false })
-);
-heartMesh.position.set(0, -1.45, 0.1);
-heartMesh.scale.setScalar(0);
-scene.add(heartMesh);
+      stems.push({
+        x: Math.cos(angle) * rand(8, 45),
+        y: rand(45, 100),
+        delay: .3 + i * .09,
+        color: greens[i % greens.length]
+      });
+    }
 
-// ─── PARTICLES ───────────────────────────────────────────────────────────────
-const PART_COUNT   = 180;
-const partPos      = new Float32Array(PART_COUNT * 3);
-const partCol      = new Float32Array(PART_COUNT * 3);
-const partVels     = [];
+    for (let i = 0; i < 13; i++) {
+      leaves.push({
+        x: rand(-70, 70),
+        y: rand(20, 115),
+        size: rand(12, 24),
+        angle: rand(-1.1, 1.1),
+        delay: .8 + i * .07,
+        color: greens[i % greens.length]
+      });
+    }
 
-for (let i = 0; i < PART_COUNT; i++) {
-  const angle = rnd(0, Math.PI * 2);
-  const r     = rnd(0, 1.8);
-  partPos[i*3]   = Math.cos(angle) * r;
-  partPos[i*3+1] = rnd(-2, 2);
-  partPos[i*3+2] = Math.sin(angle) * r;
-  const c = hexToRgb(pick(PINKS));
-  partCol[i*3] = c[0]; partCol[i*3+1] = c[1]; partCol[i*3+2] = c[2];
-  partVels.push({ vx: rnd(-0.004, 0.004), vy: rnd(0.005, 0.018), vz: rnd(-0.004, 0.004) });
-}
+    for (let i = 0; i < 20; i++) {
+      stars.push({
+        x: rand(0, W),
+        y: rand(0, H),
+        size: rand(.5, 1.5),
+        alpha: rand(.08, .25)
+      });
+    }
+  }
 
-const partGeo = new THREE.BufferGeometry();
-partGeo.setAttribute('position', new THREE.BufferAttribute(partPos, 3));
-partGeo.setAttribute('color',    new THREE.BufferAttribute(partCol, 3));
-const partMat  = new THREE.PointsMaterial({ size: 0.06, vertexColors: true, transparent: true, opacity: 0 });
-const partPts  = new THREE.Points(partGeo, partMat);
-scene.add(partPts);
+  // Draw one complete flower from individual petals.
+  function drawFlower(f, progress) {
+    if (progress <= 0) return;
 
-// burst
-const burstPool = [];
-const burstPos2 = new Float32Array(200 * 3);
-const burstCol2 = new Float32Array(200 * 3);
-const burstGeo  = new THREE.BufferGeometry();
-burstGeo.setAttribute('position', new THREE.BufferAttribute(burstPos2, 3));
-burstGeo.setAttribute('color',    new THREE.BufferAttribute(burstCol2, 3));
-const burstMat = new THREE.PointsMaterial({ size: 0.1, vertexColors: true, transparent: true, opacity: 0 });
-scene.add(new THREE.Points(burstGeo, burstMat));
+    const bloom = backEase(progress);
+    const size = f.size * bloom;
 
-function triggerBurst() {
-  for (let i = 0; i < 40; i++) {
-    const angle = rnd(0, Math.PI * 2);
-    const phi   = rnd(0, Math.PI);
-    const spd   = rnd(0.03, 0.12);
-    burstPool.push({
-      x: 0, y: 0.3, z: 0,
-      vx: Math.sin(phi) * Math.cos(angle) * spd,
-      vy: Math.sin(phi) * Math.sin(angle) * spd,
-      vz: Math.cos(phi) * spd,
-      life: 1, decay: rnd(0.012, 0.028),
-      color: hexToRgb(pick(PINKS)),
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.angle);
+
+    ctx.globalAlpha = ease(progress);
+
+    for (let i = 0; i < f.petals; i++) {
+      ctx.save();
+      ctx.rotate(i * Math.PI * 2 / f.petals);
+
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(
+        size * .35, -size * .15,
+        size * .7, -size * .75,
+        0, -size
+      );
+      ctx.bezierCurveTo(
+        -size * .7, -size * .75,
+        -size * .35, -size * .15,
+        0, 0
+      );
+
+      ctx.fillStyle = f.color;
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 5;
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Inner petals
+    for (let i = 0; i < f.petals; i++) {
+      ctx.save();
+      ctx.rotate(i * Math.PI * 2 / f.petals + .2);
+
+      ctx.beginPath();
+      ctx.ellipse(
+        0, -size * .32,
+        size * .22, size * .4,
+        0, 0, Math.PI * 2
+      );
+
+      ctx.fillStyle = f.inner;
+      ctx.globalAlpha = progress * .85;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Flower center
+    ctx.globalAlpha = progress;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * .24, 0, Math.PI * 2);
+    ctx.fillStyle = f.center;
+    ctx.shadowColor = f.center;
+    ctx.shadowBlur = 6;
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawStem(stem, progress) {
+    if (progress <= 0) return;
+
+    const p = ease(progress);
+
+    ctx.save();
+    ctx.globalAlpha = p;
+    ctx.strokeStyle = stem.color;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+
+    ctx.beginPath();
+    ctx.moveTo(stem.x * .15, 130);
+
+    ctx.bezierCurveTo(
+      stem.x * .4, 105,
+      stem.x * .8, 65,
+      stem.x, 130 - stem.y * p
+    );
+
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawLeaf(leaf, progress) {
+    if (progress <= 0) return;
+
+    ctx.save();
+    ctx.translate(leaf.x, leaf.y);
+    ctx.rotate(leaf.angle);
+
+    const size = leaf.size * ease(progress);
+
+    ctx.globalAlpha = ease(progress);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(
+      size, -size * .2,
+      size * 1.2, -size,
+      0, -size * 1.2
+    );
+    ctx.bezierCurveTo(
+      -size * .8, -size * .7,
+      -size * .7, -size * .2,
+      0, 0
+    );
+
+    ctx.fillStyle = leaf.color;
+    ctx.shadowColor = leaf.color;
+    ctx.shadowBlur = 4;
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Bouquet rotates as ONE group.
+  function drawBouquet(time) {
+    const progress = ease((time - 200) / 2200);
+    const rotationStart = 3.0;
+    const rotation = reducedMotion
+      ? 0
+      : Math.max(0, time - rotationStart * 1000) * .00017;
+
+    const scale = Math.min(W / 390, H / 680);
+    const cx = W / 2;
+    const cy = H * .43;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.rotate(rotation);
+
+    // Stems appear first.
+    stems.forEach(s => {
+      const p = clamp((time - s.delay * 1000) / 800, 0, 1);
+      drawStem(s, p);
     });
+
+    // Leaves grow after stems.
+    leaves.forEach(l => {
+      const p = clamp((time - l.delay * 1000) / 500, 0, 1);
+      drawLeaf(l, p);
+    });
+
+    // Petals build flower by flower.
+    flowers.forEach(f => {
+      const p = clamp(
+        (time - 800 - f.delay * 1000) / 650,
+        0, 1
+      );
+
+      drawFlower(f, p);
+    });
+
+    ctx.restore();
   }
-}
 
-// ─── ANIMATION STATE ─────────────────────────────────────────────────────────
-// phases:
-// 0  = camera zoom in (0 → 0.6s)
-// 1  = stems grow     (0.2s → 1.2s)
-// 2  = leaves appear  (0.8s → 1.6s)
-// 3  = flowers bloom  (0.3s → 2.5s, staggered)
-// 4  = ribbon + bow   (2.0s → 2.6s)
-// 5  = bubu pops in   (2.4s → 2.8s)
-// 6  = idle           (2.8s+)
+  // White Bubu: independent of bouquet rotation.
+  function drawBubu(time) {
+    const scale = Math.min(W / 390, H / 680);
+    const x = W / 2;
+    const y = H * .76 + Math.sin(time * .0015) * 3;
 
-let startTime = null;
-let t = 0;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
 
-function getPhaseT(elapsed, start, end) {
-  return clamp((elapsed - start) / (end - start), 0, 1);
-}
+    // Body
+    ctx.fillStyle = "#f1eaff";
+    ctx.beginPath();
+    ctx.ellipse(0, 42, 43, 39, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-// ─── ANIMATE ─────────────────────────────────────────────────────────────────
-function animate(now) {
-  requestAnimationFrame(animate);
-  if (!startTime) startTime = now;
-  const elapsed = (now - startTime) / 1000; // seconds
-  t += 0.016;
+    // Ears
+    for (const ex of [-29, 29]) {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(ex, -28, 21, 0, Math.PI * 2);
+      ctx.fill();
 
-  // ── camera intro zoom ──────────────────────────────────────────────────
-  const camT = ease(getPhaseT(elapsed, 0, 0.9));
-  camera.position.z = 12 - 7 * camT; // 12 → 5
+      ctx.fillStyle = "#ffb5cc";
+      ctx.beginPath();
+      ctx.arc(ex, -28, 12, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-  // also tilt camera down slightly then settle
-  camera.position.y = (1 - camT) * -1.5;
-  camera.lookAt(0, 0, 0);
+    // Head
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 49, 45, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-  // ── stems grow ────────────────────────────────────────────────────────
-  stemData.forEach((sd, i) => {
-    const t0 = 0.15 + i * 0.06;
-    const t1 = t0 + 0.7;
-    sd.progress = ease(getPhaseT(elapsed, t0, t1));
-    if (sd.progress > 0) buildStemMesh(sd, sd.progress);
+    // Blinking eyes
+    const phase = time % 5600;
+    const blink = phase > 4750 && phase < 5020
+      ? Math.sin((phase - 4750) / 270 * Math.PI)
+      : 0;
+
+    [-17, 17].forEach(ex => {
+      ctx.strokeStyle = "#25252b";
+      ctx.fillStyle = "#25252b";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+
+      if (blink > .1) {
+        ctx.beginPath();
+        ctx.moveTo(ex - 4, -4);
+        ctx.quadraticCurveTo(ex, -4 + 8 * blink, ex + 4, -4);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(ex, -4, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(ex + 1.5, -6, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // Nose
+    ctx.fillStyle = "#ff9db9";
+    ctx.beginPath();
+    ctx.ellipse(0, 11, 5, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Smile
+    ctx.strokeStyle = "#c87990";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 12, 8, .15, Math.PI - .15);
+    ctx.stroke();
+
+    // Cheeks
+    ctx.fillStyle = "rgba(255,155,180,.4)";
+    ctx.beginPath();
+    ctx.ellipse(-30, 14, 10, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.ellipse(30, 14, 10, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawBackground() {
+    ctx.clearRect(0, 0, W, H);
+
+    const gradient = ctx.createRadialGradient(
+      W / 2, H * .48, 10,
+      W / 2, H * .48, Math.max(W, H) * .65
+    );
+
+    gradient.addColorStop(0, "#17243d");
+    gradient.addColorStop(.55, "#0c1428");
+    gradient.addColorStop(1, "#070b16");
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Very subtle background points only.
+    stars.forEach(s => {
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = "#a6b8d8";
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.globalAlpha = 1;
+  }
+
+  function frame(now) {
+    if (!animationStarted) return;
+
+    if (!lastTime) lastTime = now;
+    const dt = Math.min((now - lastTime) / 1000, .04);
+    lastTime = now;
+    elapsed += dt;
+
+    drawBackground();
+
+    const time = reducedMotion ? 10000 : now - startTime;
+
+    drawBouquet(time);
+
+    // Bubu appears after the bouquet has mostly bloomed.
+    if (time > 2300) {
+      drawBubu(time - 2300);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  function startAnimation() {
+    animationStarted = true;
+    elapsed = 0;
+    lastTime = 0;
+    startTime = performance.now();
+
+    intro.classList.add("hidden");
+    gift.classList.add("visible");
+
+    requestAnimationFrame(frame);
+  }
+
+  openButton.addEventListener("click", startAnimation);
+
+  replayButton.addEventListener("click", () => {
+    animationStarted = false;
+    intro.classList.remove("hidden");
+    gift.classList.remove("visible");
+
+    setTimeout(() => {
+      startAnimation();
+    }, 800);
   });
 
-  // ── leaves pop ────────────────────────────────────────────────────────
-  leafMeshes.forEach(({ mesh, targetScale, delay }) => {
-    const lp = ease(getPhaseT(elapsed, delay, delay + 0.3));
-    const s  = lp * targetScale;
-    // overshoot bounce
-    const bounce = lp < 1 ? s * (1 + 0.3 * Math.sin(lp * Math.PI)) : s;
-    mesh.scale.setScalar(bounce);
-  });
+  window.addEventListener("resize", resize);
 
-  // ── flowers bloom ─────────────────────────────────────────────────────
-  flowerMeshes.forEach(({ mesh, delay }) => {
-    const fp = ease(getPhaseT(elapsed, delay, delay + 0.35));
-    if (fp > 0) {
-      mesh.visible = true;
-      // overshoot pop
-      const pop = fp < 1 ? fp * (1 + 0.4 * Math.sin(fp * Math.PI)) : 1;
-      mesh.scale.setScalar(pop);
-    }
-  });
-
-  // ── ribbon + bow ──────────────────────────────────────────────────────
-  const rbT = ease(getPhaseT(elapsed, 2.0, 2.5));
-  const rbBounce = rbT < 1 ? rbT * (1 + 0.25 * Math.sin(rbT * Math.PI)) : 1;
-  ribbon.scale.setScalar(rbBounce);
-  bow1.scale.setScalar(rbBounce);
-  bow2.scale.setScalar(rbBounce);
-
-  // ── bubu pops in ──────────────────────────────────────────────────────
-  const bubuP = ease(getPhaseT(elapsed, 2.4, 2.75));
-  const bubuBounce = bubuP < 1 ? bubuP * (1 + 0.5 * Math.sin(bubuP * Math.PI)) : 1;
-  bubuMesh.scale.setScalar(bubuBounce);
-  heartMesh.scale.setScalar(bubuBounce * 0.9);
-
-  // ── particles fade in after bouquet done ──────────────────────────────
-  partMat.opacity = ease(getPhaseT(elapsed, 2.5, 3.5)) * 0.85;
-
-  // ── idle rotation (ramps up after stems done) ─────────────────────────
-  const spinRamp = ease(getPhaseT(elapsed, 1.0, 2.0));
-  bouquet.rotation.y += 0.007 * spinRamp;
-
-  // ── individual flower spin ─────────────────────────────────────────────
-  flowerMeshes.forEach(({ mesh, rotSpd }) => { mesh.rotation.z += rotSpd; });
-
-  // ── bubu bob + heart pulse ─────────────────────────────────────────────
-  if (bubuP > 0) {
-    bubuMesh.position.y  = -1.95 + Math.sin(t * 1.8) * 0.06;
-    heartMesh.position.y = -1.45 + Math.sin(t * 2.2 + 1) * 0.08;
-    heartMesh.material.opacity = 0.6 + 0.4 * Math.sin(t * 2.5);
-  }
-
-  // ── lights pulse ──────────────────────────────────────────────────────
-  pinkLight.intensity  = 1.8 + Math.sin(t * 2)       * 0.6;
-  pinkLight2.intensity = 1.2 + Math.sin(t * 1.5 + 1) * 0.4;
-
-  // ── ambient particles ─────────────────────────────────────────────────
-  for (let i = 0; i < PART_COUNT; i++) {
-    partPos[i*3]   += partVels[i].vx;
-    partPos[i*3+1] += partVels[i].vy;
-    partPos[i*3+2] += partVels[i].vz;
-    if (partPos[i*3+1] > 2.5) {
-      partPos[i*3+1] = -2.2;
-      partPos[i*3]   = rnd(-1.8, 1.8);
-      partPos[i*3+2] = rnd(-1.8, 1.8);
-    }
-  }
-  partGeo.attributes.position.needsUpdate = true;
-
-  // ── burst ─────────────────────────────────────────────────────────────
-  let bi = 0;
-  for (let i = burstPool.length - 1; i >= 0; i--) {
-    const p = burstPool[i];
-    p.x += p.vx; p.y += p.vy; p.z += p.vz;
-    p.vy -= 0.003; p.life -= p.decay;
-    if (p.life <= 0) { burstPool.splice(i, 1); continue; }
-    if (bi < 200) {
-      burstPos2[bi*3]   = p.x; burstPos2[bi*3+1] = p.y; burstPos2[bi*3+2] = p.z;
-      burstCol2[bi*3]   = p.color[0]; burstCol2[bi*3+1] = p.color[1]; burstCol2[bi*3+2] = p.color[2];
-      bi++;
-    }
-  }
-  for (let i = bi; i < 200; i++) burstPos2[i*3] = burstPos2[i*3+1] = burstPos2[i*3+2] = 9999;
-  burstGeo.attributes.position.needsUpdate = true;
-  burstGeo.attributes.color.needsUpdate    = true;
-  burstMat.opacity = burstPool.length > 0 ? 0.9 : 0;
-
-  renderer.render(scene, camera);
-}
-
-requestAnimationFrame(animate);
-
-// ─── INPUT ───────────────────────────────────────────────────────────────────
-document.getElementById('c').addEventListener('click', triggerBurst);
-document.getElementById('c').addEventListener('touchstart', e => {
-  e.preventDefault(); triggerBurst();
-}, { passive: false });
+  resize();
+  drawBackground();
+})();
